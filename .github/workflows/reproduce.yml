@@ -1,0 +1,115 @@
+name: Reproducibility Check — ESBMC-Arduino
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:          # permite rodar manualmente pela UI do GitHub
+  schedule:
+    - cron: '0 3 1 * *'      # roda automaticamente todo dia 1 do mês
+
+env:
+  ZENODO_DOI: "10.5281/zenodo.21014210"
+  ARTIFACT_URL: "https://zenodo.org/records/21014210/files/esbmc-arduino-artifact.tar.gz"
+  ARTIFACT_SHA256: "F1e75cc13d725d081ad6394d00663678b9e111ed65816094c1926df777417a991"   # substitui pelo hash real
+
+jobs:
+  reproduce:
+    name: Reproduce on Ubuntu 22.04 (bare-metal)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    steps:
+      # ── 1. Download do artefato Zenodo ──────────────────────────────────────
+      - name: Download artifact from Zenodo
+        run: |
+          wget --progress=dot:giga \
+               --retry-connrefused --tries=3 \
+               -O artifact.tar.gz "$ARTIFACT_URL"
+
+      - name: Verify SHA-256 checksum
+        run: |
+          echo "$ARTIFACT_SHA256  artifact.tar.gz" | sha256sum --check
+
+      - name: Extract artifact
+        run: |
+          mkdir -p artifact
+          tar -xzf artifact.tar.gz -C artifact --strip-components=1
+          ls -la artifact/
+
+      # ── 2. Cache do build do ESBMC (evita rebuild a cada run) ───────────────
+      - name: Cache ESBMC build
+        id: cache-esbmc
+        uses: actions/cache@v4
+        with:
+          path: |
+            artifact/esbmc/build
+            ~/.local/lib/esbmc
+          key: esbmc-build-${{ runner.os }}-${{ hashFiles('artifact/esbmc/**/*.cpp', 'artifact/esbmc/**/*.h', 'artifact/esbmc/CMakeLists.txt') }}
+          restore-keys: |
+            esbmc-build-${{ runner.os }}-
+
+      # ── 3. Setup: instala CBMC, Frama-C, MATIEC e builda ESBMC ─────────────
+      - name: Run setup.sh
+        if: steps.cache-esbmc.outputs.cache-hit != 'true'
+        working-directory: artifact
+        run: |
+          chmod +x setup.sh
+          bash setup.sh
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      - name: Run setup.sh (deps only, ESBMC from cache)
+        if: steps.cache-esbmc.outputs.cache-hit == 'true'
+        working-directory: artifact
+        run: |
+          chmod +x setup.sh
+          SKIP_ESBMC_BUILD=1 bash setup.sh || bash setup.sh
+        env:
+          DEBIAN_FRONTEND: noninteractive
+
+      # ── 4. Verifica que as ferramentas estão disponíveis ────────────────────
+      - name: Sanity-check tools
+        working-directory: artifact
+        run: |
+          echo "=== ESBMC ===" && esbmc --version || ./esbmc --version || find . -name esbmc -type f -exec {} --version \;
+          echo "=== CBMC ===" && cbmc --version
+          echo "=== Frama-C ===" && frama-c -version
+          echo "=== MATIEC ===" && iec2c --help 2>&1 | head -5 || true
+
+      # ── 5. Reprodução dos experimentos ──────────────────────────────────────
+      - name: Run reproduce.sh
+        working-directory: artifact
+        run: |
+          chmod +x reproduce.sh
+          bash reproduce.sh 2>&1 | tee reproduce.log
+
+      # ── 6. Upload dos resultados ─────────────────────────────────────────────
+      - name: Upload results and log
+        if: always()       # sobe mesmo se o job falhar — útil para debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: reproduction-results-${{ github.run_id }}
+          path: |
+            artifact/results/
+            artifact/reproduce.log
+          retention-days: 90
+
+      # ── 7. Resumo no GitHub Actions UI ──────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        run: |
+          echo "## ESBMC-Arduino Reproducibility Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Zenodo DOI | \`$ZENODO_DOI\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Runner OS  | \`ubuntu-22.04\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run ID     | \`${{ github.run_id }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp  | $(date -u '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f artifact/reproduce.log ]; then
+            echo "### Last 30 lines of reproduce.log" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -30 artifact/reproduce.log >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
