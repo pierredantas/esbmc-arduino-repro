@@ -72,37 +72,7 @@ jobs:
           OPAMYES: "1"
           OPAM_ASSUME_DEPEXTS: "true"
 
-      - name: DEBUG — real CBMC error on one Claim-3 program
-        working-directory: artifact
-        run: |
-          [ -f ./env.sh ] && . ./env.sh
-          export IEC2C="${IEC2C:-$HOME/.esbmc-arduino/matiec/iec2c}"
-          export MATIEC_LIB="${MATIEC_LIB:-$HOME/.esbmc-arduino/matiec/lib}"
-          export CORPUS_DIR="$PWD/corpus/programs"
-          cd experiments/baseline
-          python3 - <<'PY'
-          import os, subprocess, tempfile, importlib.util
-          s = importlib.util.spec_from_file_location("rrc","run_real_corpus.py")
-          m = importlib.util.module_from_spec(s); s.loader.exec_module(m)
-          name = "malicious_massignment.xml"
-          fbs = m.parse_pous(open(m.find_xml(name),encoding="utf-8",errors="ignore").read())
-          fbs = [f for f in fbs if any(t=="INT" for _,t in f[1].get("VAR_INPUT",[]))]
-          W = tempfile.mkdtemp()
-          open(os.path.join(W,"p.st"),"w").write(m.emit_st(fbs))
-          subprocess.run([m.IEC2C,"-I",m.LIB,"-T",W,os.path.join(W,"p.st")])
-          tu=os.path.join(W,"POUS_tu.c")
-          open(tu,"w").write('#include "iec_std_lib.h"\n#include "POUS.h"\n'+open(os.path.join(W,"POUS.c")).read())
-          hn=os.path.join(W,"hn.c"); open(hn,"w").write(m.emit_harness(fbs,Fa
-          cmd=["cbmc",hn,tu,"-I",m.INC,m.DNEUT,"--16","--signed-overflow-check",
-               "--no-pointer-check","--no-bounds-check","--no-div-by-zero-che
-               "--unwind","3","--no-unwinding-assertions"]
-          r=subprocess.run(cmd,capture_output=True,text=True)
-          print("RC:",r.returncode)
-          print("=== STDOUT ==="); print(r.stdout[-3500:])
-          print("=== STDERR ==="); print(r.stderr[-2500:])
-          PY
-          
-          # ── 4b. Prove the build has Z3 + HAL annotator (fail early) ─────────────
+      # ── 4b. Prove the build has Z3 + HAL annotator (fail early) ─────────────
       - name: Verify ESBMC (Z3 backend + HAL annotator present)
         working-directory: artifact
         run: |
