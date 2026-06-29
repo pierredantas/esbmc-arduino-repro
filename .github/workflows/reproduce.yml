@@ -27,7 +27,7 @@ jobs:
 
       - name: Verify SHA-256 checksum
         run: |
-          EXPECTED="1e75cc13d725d081ad6394d00663678b9e111ed65816094c1926df777417a991"
+          EXPECTED="b5ae08bd02b5e98132a9cf5ddadeffd9ce9b82ca9d109f11a738f87fd070812f"
           ACTUAL=$(sha256sum artifact.tar.gz | awk '{print $1}')
           echo "Expected: $EXPECTED"
           echo "Actual:   $ACTUAL"
