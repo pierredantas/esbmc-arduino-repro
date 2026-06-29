@@ -21,9 +21,17 @@ The workflow runs on a **clean Ubuntu 22.04 runner** — no pre-installed ESBMC,
 ### 1. Download and extract the artifact
 
 ```bash
+wget "https://zenodo.org/records/21034231/files/esbmc-arduino-artifact.tar.gz?download=1" \
+     -O esbmc-arduino-artifact.tar.gz
 tar xzf esbmc-arduino-artifact.tar.gz
 cd esbmc-arduino-artifact
 ```
+
+> You can also verify the integrity of the download against the published checksum:
+> ```bash
+> wget "https://zenodo.org/records/21034231/files/SHA256SUMS?download=1" -O SHA256SUMS
+> sha256sum -c SHA256SUMS
+> ```
 
 ### 2. Run setup (installs CBMC, Frama-C, MATIEC, and builds patched ESBMC from source)
 
@@ -115,4 +123,5 @@ If you use this CI setup as evidence of reproducibility, cite the Zenodo record 
   doi       = {10.5281/zenodo.21014209},
   publisher = {Zenodo}
 }
+
 
