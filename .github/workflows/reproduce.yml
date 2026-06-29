@@ -28,7 +28,11 @@ jobs:
 
       - name: Verify SHA-256 checksum
         run: |
-          printf '%s  artifact.tar.gz\n' "$ARTIFACT_SHA256" | sha256sum --check
+          EXPECTED="1e75cc13d725d081ad6394d00663678b9e111ed65816094c1926df777417a991"
+          ACTUAL=$(sha256sum artifact.tar.gz | awk '{print $1}')
+          echo "Expected: $EXPECTED"
+          echo "Actual:   $ACTUAL"
+          [ "$EXPECTED" = "$ACTUAL" ] && echo "OK" || { echo "MISMATCH"; exit 1; }
 
       - name: Extract artifact
         run: |
