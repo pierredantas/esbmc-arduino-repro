@@ -18,29 +18,24 @@ jobs:
     timeout-minutes: 120
 
     steps:
-      # ── 1. Download the artifact from Zenodo ────────────────────────────────
-      - name: Download artifact from Zenodo
+      - name: Download artifact + checksums from Zenodo
         run: |
-          wget --progress=dot:giga \
-               --retry-connrefused --tries=3 \
-               -O artifact.tar.gz "$ARTIFACT_URL"
+          SHA_URL="${ARTIFACT_URL%/*}/SHA256SUMS"
+          wget --progress=dot:giga --retry-connrefused --tries=3 \
+               -O esbmc-arduino-artifact.tar.gz "$ARTIFACT_URL"
+          wget --retry-connrefused --tries=3 -O SHA256SUMS "$SHA_URL"
 
-      - name: Verify download integrity
+      - name: Verify SHA-256 integrity
         run: |
-          SIZE=$(stat -c%s artifact.tar.gz)
-          echo "Downloaded ${SIZE} bytes"
-          [ "$SIZE" -gt 7000000 ] && echo "OK" || { echo "File too small"; exit 1; }
+          cat SHA256SUMS
+          sha256sum -c SHA256SUMS
 
       - name: Extract artifact
         run: |
           mkdir -p artifact
-          tar -xzf artifact.tar.gz -C artifact --strip-components=1
+          tar -xzf esbmc-arduino-artifact.tar.gz -C artifact --strip-components=1
           ls -la artifact/
 
-      # ── 2. Cache the ESBMC build ────────────────────────────────────────────
-      #  v2 salt: invalidates the pre-fix (no-Z3 / no-LD) caches.
-      #  Key is tied to setup.sh + esbmc-src.tar.gz, and there is NO broad
-      #  restore-keys, so a stale build can never be restored over a changed input.
       - name: Cache ESBMC build
         id: cache-esbmc
         uses: actions/cache@v4
@@ -48,9 +43,6 @@ jobs:
           path: ~/.esbmc-arduino
           key: esbmc-arduino-v2-${{ runner.os }}-${{ hashFiles('artifact/setup.sh', 'artifact/esbmc-src.tar.gz') }}
 
-      # ── 3. System dependencies for Frama-C (via opam) ───────────────────────
-      #  Always run: CBMC (apt) and Frama-C (~/.opam) are NOT in the cache and do
-      #  not survive a fresh runner VM, so this must not be gated on a cache hit.
       - name: Pre-install Frama-C system dependencies
         run: |
           sudo apt-get update
@@ -58,10 +50,6 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
 
-      # ── 4. Full setup ───────────────────────────────────────────────────────
-      #  Always run. setup.sh is idempotent: it SKIPS the (cached) ESBMC build when
-      #  the binary is present, but still (re)installs CBMC / Frama-C / MATIEC and
-      #  writes env.sh — none of which the cache provides on a fresh runner.
       - name: Run setup.sh
         working-directory: artifact
         run: |
@@ -72,38 +60,27 @@ jobs:
           OPAMYES: "1"
           OPAM_ASSUME_DEPEXTS: "true"
 
-      # ── 4b. Prove the build has Z3 + HAL annotator (fail early) ─────────────
       - name: Verify ESBMC (Z3 backend + HAL annotator present)
         working-directory: artifact
         run: |
           ESBMC="$HOME/.esbmc-arduino/esbmc-src/build/src/esbmc/esbmc"
-          test -x "$ESBMC" || { echo "::error::ESBMC binary not found at $ESBMC"; exit 1; }
+          test -x "$ESBMC" || { echo "::error::ESBMC binary not found at $ESB
           "$ESBMC" --version
-          out=$("$ESBMC" experiments/gen/A_bug__abstract.c --z3 --no-pointer-check --no-align-check 2>&1) || true
+          out=$("$ESBMC" experiments/gen/A_bug__abstract.c --z3 --no-pointer-|| true
           echo "$out"
           echo "$out" | grep -qE 'VERIFICATION (SUCCESSFUL|FAILED)' \
             || { echo "::error::ESBMC produced no verdict — Z3 backend missing"; exit 1; }
           strings "$ESBMC" | grep -q HAL_ANNOTATE \
             || { echo "::error::HAL_ANNOTATE not in binary — LD frontend not compiled"; exit 1; }
-          echo "✓ Z3 verdict produced and HAL_ANNOTATE present"
+          echo "Z3 verdict produced and HAL_ANNOTATE present"
 
-      # ── 5. Check that the tools are available ───────────────────────────────
       - name: Sanity-check tools
         run: |
-          echo "=== CBMC ==="
-          cbmc --version
-          echo "=== MATIEC ==="
-          ~/.esbmc-arduino/matiec/iec2c -v 2>&1 | head -3 || true
-          echo "=== ESBMC ==="
-          "$HOME/.esbmc-arduino/esbmc-src/build/src/esbmc/esbmc" --version 2>&1 | head -3 \
-            || echo "ESBMC not found at expected prefix — check setup.sh"
-          echo "=== Frama-C ==="
-          eval "$(opam env --switch=frama 2>/dev/null)" || true
-          frama-c -version 2>/dev/null \
-            || ~/.opam/frama/bin/frama-c -version 2>/dev/null \
-            || echo "Frama-C not found in PATH — may need eval opam env"
+          echo "=== CBMC ==="; cbmc --version
+          echo "=== MATIEC ==="; ~/.esbmc-arduino/matiec/iec2c -v 2>&1 | head -3 || true
+          echo "=== ESBMC ==="; "$HOME/.esbmc-arduino/esbmc-src/build/src/esbad -3 || echo "ESBMC missing"
+          echo "=== Frama-C ==="; eval "$(opam env --switch=frama 2>/dev/null)" || true; frama-c -version 2>/dev/null || echo "Frama-C missing"
 
-      # ── 6. Reproduce the experiments ────────────────────────────────────────
       - name: Run reproduce.sh
         working-directory: artifact
         run: |
@@ -111,7 +88,6 @@ jobs:
           eval "$(opam env --switch=frama 2>/dev/null)" || true
           bash reproduce.sh 2>&1 | tee reproduce.log
 
-      # ── 7. Upload the results ───────────────────────────────────────────────
       - name: Upload results and log
         if: always()
         uses: actions/upload-artifact@v4
@@ -123,21 +99,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-      # ── 8. Summary in the GitHub Actions UI ─────────────────────────────────
       - name: Write job summary
         if: always()
         run: |
-          echo "## ESBMC-Arduino Reproducibility Report" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## ESBMC-Arduino Reproducibility Report" >> $GITHUB_STEP_SUMM
           echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| Zenodo DOI | \`$ZENODO_DOI\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Runner OS  | \`ubuntu-22.04\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Run ID     | \`${{ github.run_id }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| Timestamp  | $(date -u '+%Y-%m-%d %H:%M UTC') |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run ID | \`${{ github.run_id }}\` |" >> $GITHUB_STEP_SUMMAR
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f artifact/reproduce.log ]; then
-            echo "### Last 30 lines of reproduce.log" >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
             tail -30 artifact/reproduce.log >> $GITHUB_STEP_SUMMARY
             echo '```' >> $GITHUB_STEP_SUMMARY
