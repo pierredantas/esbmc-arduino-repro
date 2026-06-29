@@ -8,8 +8,8 @@ on:
     - cron: '0 3 1 * *'
 
 env:
-  ZENODO_DOI: "10.5281/zenodo.21030878"
-  ARTIFACT_URL: "https://zenodo.org/records/21030878/files/esbmc-arduino-artifact.tar.gz"
+  ZENODO_DOI: "10.5281/zenodo.21031914"
+  ARTIFACT_URL: "https://zenodo.org/records/21031914/files/esbmc-arduino-artifact.tar.gz"
 
 jobs:
   reproduce:
